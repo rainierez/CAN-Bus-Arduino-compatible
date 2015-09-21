@@ -61,20 +61,23 @@ U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);  // I2C / TWI
 Everything below the first stage point is out of range and won't trigger the LED strip.
 Everthing above the second stage point is in the warning zone.
 ==================================================================================*/
-int stagePT[2] = {4800, 6200};
+int stagePT[2] = {4200, 6200};
 
 /* LED levels =====================================================================
 Between the active stage points above we have to break up the LEDs to levels
 The outside numbers should always be the limit of the pixel strip, they are 0 aligned
 ==================================================================================*/
-//int ledStages[4] = {0, 9, 12, strip.numPixels()-1}; //For positive direction i.e. led 0->8
 int ledStages[4] = {strip.numPixels()-1, 5, 2, 0}; //For top down direction i.e. leds 8->0
+//int ledStages[4] = {0, 9, 12, strip.numPixels()-1}; //For positive direction i.e. led 0->8
 
 /* Colors for each stage ===========================================================
 * {First level color, second, thrid and warning}
-* 255 = green, 48 = yellow, 86 = red
+* 0 = green, 48 = yellow, 86 = red
 ==================================================================================*/
-int wheelValues[3] = {255, 48, 86}; 
+int wheelValue0Default = 255;
+int wheelValue1Default = 48;
+int wheelValue3Default = 86;
+int wheelValues[3] = {0, 48, 86}; 
 
 // 255 full bright to 32 most dim
 int stripBrightness = 122;
@@ -82,7 +85,6 @@ int stripBrightness = 122;
 //Button settings
 boolean button_was_pressed = 1;     // the previous reading from the input pin
 long debounceDelay = 25;    // the debounce time; increase if the output flickers
-
 
 //OLED display update and LED settings
 long prevDispTime = 0;
@@ -94,6 +96,7 @@ float lastDisplayValue = 0;
 uint32_t color[3];
 int prev_range = 100;
 int gaugeType = 1;
+boolean alarmOutsideRange = 1;
 
 /*=== FUNCTION clearDisplays ========================================================
  * Purpose:
@@ -170,6 +173,17 @@ boolean handle_button() {
   return event;
 }
 
+void set_levels(int stagePT0 = 4200, int stagePT1 = 6200, int stage0 = 5, int stage1 = 2, int color0 = 255, int color1 = 48, int color2 = 86, boolean alarm = 1){
+  stagePT[0] = stagePT0;
+  stagePT[1] = stagePT1;
+  ledStages[1] = stage0;
+  ledStages[2] = stage1;
+  color[0] = Wheel(color0 & 255);
+  color[1] = Wheel(color1 & 255);
+  color[2] = Wheel(color2 & 255);
+  alarmOutsideRange = alarm;
+}
+
 //====================
 // Main loop 
 //====================
@@ -177,11 +191,10 @@ void loop() {
   float rpm = 0.9, vss = 0.9, throtle = 0.9, maf = 0.9, manifoldAP = 0.9, bar = 0.9, coolant = 0.9, temp = 0.9, fuel = .9;
   
   switch(gaugeType){
-    case 1:
+    case 1: // RPM Shift light and Tachometer
       rpm = Canbus.ecu_req(ENGINE_RPM);
       if (rpm != .9){
-        stagePT[0] = 4200; 
-        stagePT[1] = 6200;
+        set_levels();
         OLED_update(rpm, 4, 0, "RPM");
         ledStrip_update(rpm);
       } else {
@@ -193,12 +206,11 @@ void loop() {
       }
     break;
     
-    case 2:
+    case 2: //Speedometer
       vss = Canbus.ecu_req(VEHICLE_SPEED);
       if (vss != .9){
         vss = vss * .62137119;
-        stagePT[0] = 1; 
-        stagePT[1] = 100;
+        set_levels(1,100);
         OLED_update(vss, 3, 1, "Speed (mph)");
         ledStrip_update(vss);
       } else {
@@ -210,13 +222,12 @@ void loop() {
       }
     break;
     
-    case 3:
+    case 3: // Fuel Economny, Instant MPG
       vss = Canbus.ecu_req(VEHICLE_SPEED);
       maf = Canbus.ecu_req(MAF_SENSOR);
       if (vss != .9 && maf != .9){
         float instantMPG = (14.7 * 6.17 * 454 * vss * .6213) / (3600 * maf);
-        stagePT[0] = 0; 
-        stagePT[1] = 100;
+        set_levels(1, 50, 14, 12, 48, 10, 0, 0);
         OLED_update(instantMPG, 4, 1, "Instant MPG");
         ledStrip_update(instantMPG);
       } else {
@@ -228,13 +239,12 @@ void loop() {
       }
     break;
     
-    case 4:
+    case 4: // Boost Gauge
       manifoldAP = Canbus.ecu_req(MAP);
       bar = Canbus.ecu_req(BAROMETRIC);
       if (manifoldAP != .9 && bar != .9){
         float boost = (manifoldAP - bar) * .1450377377;
-        stagePT[0] = -14; 
-        stagePT[1] = 10;
+        set_levels(-15, 10, 12, 7, 20, 10, 0, 0);
         OLED_update(boost, 4, 1, "Boost (psi)");
         ledStrip_update(boost);
       } else {
@@ -249,8 +259,10 @@ void loop() {
     case 5:
       fuel = Canbus.ecu_req(FUEL_LEVEL);
       if (fuel != .9){
+        set_levels(1, 100, 14, 12, 86, 48, 0, 0);
         stagePT[0] = 1; 
         stagePT[1] = 100;
+        ledStages[1] = strip.numPixels(); //all LEDs inside the stage 1
         OLED_update(fuel, 4, 1, "Fuel Level (%)");
         ledStrip_update(fuel);
       } else {
@@ -265,8 +277,7 @@ void loop() {
     case 6:
       coolant = Canbus.ecu_req(ENGINE_COOLANT_TEMP);
       if (coolant != .9){
-        stagePT[0] = 0; 
-        stagePT[1] = 180;
+        set_levels(-10, 50, 5, 2, 0, 48, 86, 0);
         OLED_update(coolant, 4, 1, "Coolant (c)");
         ledStrip_update(coolant);
       } else {
@@ -281,8 +292,7 @@ void loop() {
     case 7:
       temp = Canbus.ecu_req(AMBIENT_TEMP);
       if (temp != .9){
-        stagePT[0] = -10; 
-        stagePT[1] = 100;
+        set_levels(-10, 50, 5, 2, 0, 48, 86,0);
         OLED_update(temp, 4, 1, "Ambient (c)");
         ledStrip_update(temp);
       } else {
@@ -354,7 +364,7 @@ void OLED_update(float displayValue, byte width, byte precision, char* label) {
 void ledStrip_update(float displayValue) {
   unsigned long currentMillis = millis();
   
-  if (displayValue >= stagePT[0] && displayValue < stagePT[1]) { //if the RPM is between the activation pt and the shift pt
+  if (displayValue >= stagePT[0] && (displayValue < stagePT[1] || alarmOutsideRange == 0)) { //if the RPM is between the activation pt and the shift pt
     //map the RPM values to 9(really 8 since the shift point and beyond is handled below)and constrain the range
     int displayValueMapped = map(displayValue, stagePT[0], stagePT[1], 0, strip.numPixels());
     int displayValueConstrained = constrain(displayValueMapped, 0, strip.numPixels());
@@ -373,7 +383,7 @@ void ledStrip_update(float displayValue) {
       strip.show();
     }
   }
-  else if (displayValue >= stagePT[1]) { //SHIFT DAMNIT!! This blinks the LEDS back and forth with no delay to block button presses
+  else if (displayValue >= stagePT[1] && alarmOutsideRange) { //SHIFT DAMNIT!! This blinks the LEDS back and forth with no delay to block button presses
     prev_range = 8;
     if (currentMillis - prevBlinkTime > blinkInterval){
       prevBlinkTime = currentMillis;
