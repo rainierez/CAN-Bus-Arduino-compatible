@@ -68,7 +68,6 @@ Between the active stage points above we have to break up the LEDs to levels
 The outside numbers should always be the limit of the pixel strip, they are 0 aligned
 ==================================================================================*/
 int ledStages[4] = {strip.numPixels()-1, 5, 2, 0}; //For top down direction i.e. leds 8->0
-//int ledStages[4] = {0, 9, 12, strip.numPixels()-1}; //For positive direction i.e. led 0->8
 
 /* Colors for each stage ===========================================================
 * {First level color, second, thrid and warning}
