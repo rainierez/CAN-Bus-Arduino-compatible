@@ -74,13 +74,10 @@ int ledStages[4] = {strip.numPixels()-1, 5, 2, 0}; //For top down direction i.e.
 * {First level color, second, thrid and warning}
 * 0 = green, 48 = yellow, 86 = red
 ==================================================================================*/
-int wheelValue0Default = 255;
-int wheelValue1Default = 48;
-int wheelValue3Default = 86;
 int wheelValues[3] = {0, 48, 86}; 
 
 // 255 full bright to 32 most dim
-int stripBrightness = 122;
+int stripBrightness = 64;
 
 //Button settings
 boolean button_was_pressed = 1;     // the previous reading from the input pin
@@ -98,44 +95,38 @@ int prev_range = 100;
 int gaugeType = 1;
 boolean alarmOutsideRange = 1;
 
-/*=== FUNCTION clearDisplays ========================================================
+/*=== FUNCTION clearLEDs =============================================================
  * Purpose:
- * Easily clear either (or both) of the displays on the gauge
+ * Clears the LED strip
  * 
- * Parameter Passed:
- * boolean OLEDdisplay -> Should we clear the OLED Display? defaulted to true, not required
- * boolean LEDstrip -> Should be clear the LEDstrip? defaulted to true, not required
+ * Parameter Passed: void
  * 
  * Returns: void
 ================================================================================== */
-void clearDisplays(boolean OLEDdisplay = true, boolean LEDstrip = true) {
-  if (OLEDdisplay) {
-    // Clears the OLED Display
-    u8g.firstPage();  
-    do {
-    } while( u8g.nextPage() );
+void clearLEDs(){
+  for( int i = 0; i < strip.numPixels(); i++){ 
+    strip.setPixelColor(i, 0); 
   }
-  if (LEDstrip) {
-    // Clears (Turns off) all the LEDs on the strips
-    for( int i = 0; i < strip.numPixels(); i++){ 
-      strip.setPixelColor(i, 0); 
-    }
-    strip.show(); 
-  }
+  strip.show(); 
 }
 
 //====================
 // Setup
 //====================
 void setup() { 
+  // Initial initialize the button pin to an input
   pinMode(BUTTON_PIN, INPUT);
+
+  // Start the hardware serial
   Serial.begin(115200);
   Serial.println("CANBus Shiftlight starting");
-  
+
+  //Start up the NeoPixel Strip
   strip.begin(); 
   strip.show(); // Initialize all pixels to 'off' 
   strip.setBrightness(stripBrightness);
-  
+
+  // Start the CAN Bus
   if(Canbus.init(CANSPEED_500))  /* Initialise MCP2515 CAN controller at the specified speed */
   {
     Serial.println("CAN Init ok");
@@ -144,16 +135,13 @@ void setup() {
     Serial.println("Can't init CAN");
   } 
 
-  color[0] = Wheel(wheelValues[0] & 255);
-  color[1] = Wheel(wheelValues[1] & 255);
-  color[2] = Wheel(wheelValues[2] & 255);
-  
-  strip.setBrightness(stripBrightness);
-  
+  // Start the OLED and clear the display
   u8g.setColorIndex(1);         // pixel on
   u8g.firstPage();  
     do {
   } while( u8g.nextPage() );
+  
+  clearLEDs();
 } 
 
 /*=== FUNCTION handle_button=========================================================
@@ -173,6 +161,22 @@ boolean handle_button() {
   return event;
 }
 
+/*=== FUNCTION set_levels=========================================================
+ * Purpose:
+ * Allows each different gauge to change the LED behavior settings
+ * 
+ * Parameter Passed: (each parameter is set to the default values for the Tachometer)
+ * - int stagePT0 = 4200
+ * - int stagePT1 = 6200
+ * - int stage0 = 5
+ * - int stage1 = 2
+ * - int color0 = 255
+ * - int color1 = 48
+ * - int color2 = 86
+ * - boolean alarm = 1
+ * 
+ * Returns: void
+================================================================================== */
 void set_levels(int stagePT0 = 4200, int stagePT1 = 6200, int stage0 = 5, int stage1 = 2, int color0 = 255, int color1 = 48, int color2 = 86, boolean alarm = 1){
   stagePT[0] = stagePT0;
   stagePT[1] = stagePT1;
@@ -225,7 +229,7 @@ void loop() {
     case 3: // Fuel Economny, Instant MPG
       vss = Canbus.ecu_req(VEHICLE_SPEED);
       maf = Canbus.ecu_req(MAF_SENSOR);
-      if (vss != .9 && maf != .9){
+      if (vss != .9 || maf != .9){
         float instantMPG = (14.7 * 6.17 * 454 * vss * .6213) / (3600 * maf);
         set_levels(1, 50, 14, 12, 48, 10, 0, 0);
         OLED_update(instantMPG, 4, 1, "Instant MPG");
@@ -240,9 +244,10 @@ void loop() {
     break;
     
     case 4: // Boost Gauge
+    default:
       manifoldAP = Canbus.ecu_req(MAP);
       bar = Canbus.ecu_req(BAROMETRIC);
-      if (manifoldAP != .9 && bar != .9){
+      if (manifoldAP != .9 || bar != .9){
         float boost = (manifoldAP - bar) * .1450377377;
         set_levels(-15, 10, 12, 7, 20, 10, 0, 0);
         OLED_update(boost, 4, 1, "Boost (psi)");
@@ -277,6 +282,7 @@ void loop() {
     case 6:
       coolant = Canbus.ecu_req(ENGINE_COOLANT_TEMP);
       if (coolant != .9){
+        coolant = (coolant *1.8)+32;
         set_levels(-10, 50, 5, 2, 0, 48, 86, 0);
         OLED_update(coolant, 4, 1, "Coolant (c)");
         ledStrip_update(coolant);
@@ -292,6 +298,7 @@ void loop() {
     case 7:
       temp = Canbus.ecu_req(AMBIENT_TEMP);
       if (temp != .9){
+        temp = (temp *1.8)+32;
         set_levels(-10, 50, 5, 2, 0, 48, 86,0);
         OLED_update(temp, 4, 1, "Ambient (c)");
         ledStrip_update(temp);
@@ -372,7 +379,7 @@ void ledStrip_update(float displayValue) {
     int numOfLEDs = strip.numPixels()-1- displayValueConstrained;
     if (prev_range != numOfLEDs) { //This makes it so we only update the LED when the range changes so we don't readdress the strip every reading
       prev_range = numOfLEDs;
-      clearDisplays(false, true);
+      clearLEDs();
       for (int ledNum = strip.numPixels()-1; ledNum >= numOfLEDs; ledNum--) {
         Serial.print("ledNum: ");
         Serial.println(ledNum);
@@ -412,7 +419,7 @@ void ledStrip_update(float displayValue) {
   else {
     if (prev_range != 100) {
       prev_range = 100;
-      clearDisplays(false,true);
+      clearLEDs();
     }
   }
 }
