@@ -1,8 +1,9 @@
 /*--------------------------------------------------------
-MULTI-DISPLAY
+MULTI-DISPLAY 
 CAN bus driven display using ODBII PIDs
 Author: Chris Crumpacker                               
 Date: September 2015
+
 
 Copyright (c) 2015 Chris Crumpacker.  All right reserved.
 
@@ -33,6 +34,9 @@ Libraries needed:
 Version Notes:
 v0.3 - Changing to the 16 pixel ring from adafruit
 v0.2 - adding in more gauges and switching to floats for the data types
+
+To Do:
+- Add code to change the NeoPixels brightness based on Lux values.
 --------------------------------------------------------*/
 
 //-------------------------
@@ -42,15 +46,21 @@ v0.2 - adding in more gauges and switching to floats for the data types
 #include <CrumpCanbus.h>
 #include <Adafruit_NeoPixel.h>
 #include "U8glib.h"
+#include <BH1750FVI.h>
+
+BH1750FVI LightSensor;
 
 // declares pin 6 as the output for the NeoPixel Display 
 #define PIN 6
 #define NUMNEOPIXELS 16
 
 // declares pin 3 as the input for the Button
-#define BUTTON_PIN    3
+#define BUTTON_PIN    5
 
+// Initialize NeoPixel library
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMNEOPIXELS, PIN, NEO_GRB + NEO_KHZ800);
+
+// Initialize OLED library
 U8GLIB_SSD1306_128X64 u8g(U8G_I2C_OPT_NONE);  // I2C / TWI 
 
 //-------------------------
@@ -125,22 +135,34 @@ void setup() {
   strip.show(); // Initialize all pixels to 'off' 
   strip.setBrightness(stripBrightness);
 
+  LightSensor.begin();
+  LightSensor.SetAddress(Device_Address_L);
+  LightSensor.SetMode(Continuous_H_resolution_Mode);
+  
+START_INIT:  
   // Start the CAN Bus
-  if(Canbus.init(CANSPEED_500))  /* Initialise MCP2515 CAN controller at the specified speed */
-  {
-    Serial.println("CAN Init ok");
-  } else
-  {
-    Serial.println("Can't init CAN");
-  } 
-
-  // Start the OLED and clear the display
-  u8g.setColorIndex(1);         // pixel on
-  u8g.firstPage();  
+  if(Canbus.init(CANSPEED_500)) { /* Initialise MCP2515 CAN controller at the specified speed */
+    u8g.firstPage();  
     do {
-  } while( u8g.nextPage() );
+      u8g.setFont(u8g_font_fub11r);
+      u8g.drawStr( 0, 11, "Starting");
+      u8g.drawStr( 0, 40, "CAN OK" );
+    } while( u8g.nextPage() );
+    Serial.println("CAN Init ok");
+  } else {
+    u8g.firstPage();  
+    do {
+      u8g.setFont(u8g_font_fub11r);
+      u8g.drawStr( 0, 11, "Starting");
+      u8g.drawStr( 0, 40, "CAN Failed" );
+    } while( u8g.nextPage() );
+    Serial.println("CAN Failed");
+    delay(5000);
+    goto START_INIT;
+  } 
   
   clearLEDs();
+  delay(1000);
 } 
 
 /*=== FUNCTION handle_button=========================================================
@@ -151,13 +173,16 @@ void setup() {
  * 
  * Returns: boolean, true if button is in a different state than before
 ================================================================================== */
-boolean handle_button() {
+void handle_button() {
   boolean event;
   int button_now_pressed = !digitalRead(BUTTON_PIN); // pin low -> pressed
 
   event = button_now_pressed && !button_was_pressed;
   button_was_pressed = button_now_pressed;
-  return event;
+  if(event) {
+    gaugeType++;
+    if(gaugeType > 8) {gaugeType =1;}
+  }
 }
 
 /*=== FUNCTION set_levels=========================================================
@@ -260,7 +285,7 @@ void loop() {
       }
     break;
     
-    case 5:
+    case 5: // Fuel level (Gas guague)
       fuel = Canbus.ecu_req(FUEL_LEVEL);
       if (fuel != .9){
         set_levels(1, 100, 14, 12, 86, 48, 0, 0);
@@ -278,12 +303,12 @@ void loop() {
       }
     break;
     
-    case 6:
+    case 6: // Coolant temp ( most thermostats are triggered at 180 so alerting above that)
       coolant = Canbus.ecu_req(ENGINE_COOLANT_TEMP);
       if (coolant != .9){
         coolant = (coolant *1.8)+32;
-        set_levels(-10, 50, 5, 2, 0, 48, 86, 0);
-        OLED_update(coolant, 4, 1, "Coolant (c)");
+        set_levels(190, 220, 5, 2, 0, 48, 86, 0);
+        OLED_update(coolant, 4, 1, "Coolant (f)");
         ledStrip_update(coolant);
       } else {
           u8g.firstPage();  
@@ -294,12 +319,12 @@ void loop() {
       }
     break;
     
-    case 7:
+    case 7: // Ambient temp (in the engine compartment I think)
       temp = Canbus.ecu_req(AMBIENT_TEMP);
       if (temp != .9){
         temp = (temp *1.8)+32;
-        set_levels(-10, 50, 5, 2, 0, 48, 86,0);
-        OLED_update(temp, 4, 1, "Ambient (c)");
+        set_levels(85, 110, 5, 2, 0, 48, 86,0);
+        OLED_update(temp, 4, 1, "Ambient (f)");
         ledStrip_update(temp);
       } else {
           u8g.firstPage();  
@@ -309,15 +334,17 @@ void loop() {
           } while( u8g.nextPage() );
       }
     break;
+    
+    case 8: // Light intensity testing
+      uint16_t lux = LightSensor.GetLightIntensity();// Get Lux value
+      set_levels(0, 10000, 5, 2, 0, 48, 86,0);
+      OLED_update(lux, 5, 0, "LUX");
+      ledStrip_update(lux);
+      delay(1000);
+    break;
   }
   
-  if(handle_button()) {
-    gaugeType++;
-    if(gaugeType > 7) {gaugeType =1;}
-    u8g.firstPage();  
-      do {
-    } while( u8g.nextPage() );
-  }
+  handle_button();
 }
 
 /*=== FUNCTION OLED_update=========================================================
