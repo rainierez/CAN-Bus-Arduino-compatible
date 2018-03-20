@@ -1,1 +1,0 @@
-=if(A2="","",if(isblank(G2),if(isblank(F2),"Nothing Due?",if(now()>D2,if(D2="","Outstanding, No Due Date",if(K2="n","Don't Pay","Past Due")),if(K2="n","Don't Pay","Outstanding"))),if((F2-G2)=0,if(D2>=E2,"Paid in Full","Paid in Full, Late"),if((F2-G2)<0,"Over Paid",if(now()>D2,if(D2="","Outstanding, No Due Date","Past Due"),"Outstanding")))))
